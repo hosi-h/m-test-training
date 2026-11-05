@@ -1,0 +1,48 @@
+#!/bin/sh
+# 記録（コミット）の前に、公開してはいけない情報が入っていないかを調べる。
+# 見つかったらコミットを止める。このリポジトリは GitHub Pages で公開される。
+# 有効化（クローンごとに1回）： git config core.hooksPath .githooks
+
+fail=0
+say() { printf '%s\n' "$1" >&2; }
+
+# 1) ファイル名のチェック（.gitignore を無視して追加された場合も止める）
+bad_names=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '(^|/)(\.env(\..*)?|.*\.(key|pem|p12|pfx|keystore|secret)|credentials.*\.json|client_secret.*\.json|service-account.*\.json|\.clasprc\.json|.*\.(xlsx|xls|csv|pdf|numbers))$')
+if [ -n "$bad_names" ]; then
+  say "✖ 公開してはいけない種類のファイルが含まれています："
+  say "$bad_names"
+  fail=1
+fi
+
+# 2) 追加された行の中身のチェック
+added=$(git diff --cached -U0 --diff-filter=ACMR | grep -E '^\+[^+]')
+
+patterns='AIza[0-9A-Za-z_-]{30,}|gh[pousr]_[0-9A-Za-z]{30,}|github_pat_[0-9A-Za-z_]{30,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|ya29\.[0-9A-Za-z_-]{20,}|"private_key"[[:space:]]*:'
+hits=$(printf '%s\n' "$added" | grep -E "$patterns")
+if [ -n "$hits" ]; then
+  say "✖ APIキー・トークン・秘密鍵らしき文字列が含まれています："
+  printf '%s\n' "$hits" | cut -c1-120 >&2
+  fail=1
+fi
+
+# 3) Apps Script の合言葉が書き込まれていないか（ひな形の文字列以外は止める）
+token_line=$(printf '%s\n' "$added" | grep -E "const[[:space:]]+TOKEN[[:space:]]*=" | grep -v "ここに合言葉を設定")
+if [ -n "$token_line" ]; then
+  say "✖ gas/Code.gs に合言葉が書き込まれています。'ここに合言葉を設定' に戻してください。"
+  fail=1
+fi
+
+# 4) 「パスワード = 値」のような書き方（vendor の外部ライブラリは除く）
+pw=$(git diff --cached -U0 --diff-filter=ACMR -- . ':(exclude)vendor' | grep -E '^\+[^+]' | grep -iE "(password|passwd|api[_-]?key|secret|access[_-]?token)[\"']?[[:space:]]*[:=][[:space:]]*[\"'][^\"']{6,}[\"']")
+if [ -n "$pw" ]; then
+  say "✖ パスワードやキーを直接書いたような行があります："
+  printf '%s\n' "$pw" | cut -c1-120 >&2
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  say ""
+  say "コミットを中止しました。該当の内容を取り除いてから、もう一度コミットしてください。"
+  exit 1
+fi
+exit 0

@@ -1,0 +1,42 @@
+# このリポジトリは GitHub Pages で公開される。秘密の情報は絶対に入れない。
+# 合言葉（TOKEN）は Apps Script の画面と各端末の中だけで扱い、ファイルには書かない。
+
+# --- 秘密情報（APIキー・認証情報・鍵） ---
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.keystore
+credentials*.json
+client_secret*.json
+service-account*.json
+token*.json
+secrets/
+secret*
+*.secret
+*.local.*
+.clasprc.json
+
+# --- 検査データ・個人情報（書き出したファイルや元資料） ---
+*.xlsx
+*.xls
+*.csv
+*.pdf
+*.numbers
+*.key.zip
+data/
+export/
+backup/
+
+# --- Mac・エディタ・一時ファイル ---
+.DS_Store
+._*
+.vscode/
+.idea/
+*.swp
+*~
+*.log
+node_modules/
+.claude/

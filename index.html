@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>M-Test 検査トレーニング</title>
+  <meta name="theme-color" content="#0f8a4f">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="M-Test">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <button class="brand" data-action="home" aria-label="最初の画面へ">M-Test <span>検査トレーニング</span></button>
+    <nav class="steps" id="steps"></nav>
+    <div class="top-actions">
+      <span class="sync" id="sync" title="未送信データ"></span>
+      <button class="icon-btn" data-action="history">履歴</button>
+      <button class="icon-btn" data-action="settings">設定</button>
+    </div>
+  </header>
+  <main id="app"></main>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+  <script src="export.js"></script>
+</body>
+</html>
