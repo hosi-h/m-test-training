@@ -93,10 +93,11 @@ function addPersonSheet(wb, r, name) {
     ['氏名', b.name], ['年齢（歳）', /^\d+$/.test(b.age ?? '') ? Number(b.age) : b.age], ['性別', b.sex], ['利き腕', b.hand], ['利き脚', b.foot],
     ['スポーツ種目', b.sport], ['ポジション', b.position], ['ケガの有無', b.injury], ['ケガの場所', b.injuryPlace],
     ['ケガの状態', b.injuryState], ['既往歴', b.history],
+    ['NRS 現在の痛み', r.painBefore ?? ''], ['NRS ケア後の痛み', r.painAfter ?? ''],
     ['検査した部位', PARTS.filter(p => r.parts?.[p.id]).map(p => p.name).join('・') || 'なし'],
     ['検査しない部位', PARTS.filter(p => !r.parts?.[p.id]).map(p => p.name).join('・') || 'なし'],
-    ['作成', `${fmt(r.createdAt)} ${r.createdBy || ''}（${r.createdDevice || ''}）`],
-    ['更新', `${fmt(r.updatedAt)} ${r.updatedBy || ''}（${r.updatedDevice || ''}）・修正${r.revision || 1}回`],
+    ['検査', `${fmt(r.createdAt)} ${r.createdBy || ''}（${r.createdDevice || ''}）`],
+    ['修正', `${fmt(r.updatedAt)} ${r.updatedBy || ''}（${r.updatedDevice || ''}）・修正${r.revision || 1}回`],
   ];
   let row = 3;
   info.forEach(([k, v]) => {
