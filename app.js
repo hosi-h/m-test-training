@@ -1,6 +1,8 @@
 // M-Test 検査トレーニング PWA
 'use strict';
 
+const APP_VERSION = 'v1.1';   // 合流（マージ）のたびに上げる。GitHub の版の名前（タグ）と同じにする
+
 // ---------- 保存領域 ----------
 const store = {
   get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch { return d; } },
@@ -33,6 +35,7 @@ let gateReturn = 'basic'; // 合言葉が通った後に戻る画面
 let records = store.get('mt_records', {});   // id -> record（_pending: 未送信）
 let rec = newRecord();
 let dirty = false;
+let editorName = '';   // 修正するときの修正者名（初期値は設定の検査者名）
 let view = 'basic';
 
 function newRecord() {
@@ -44,6 +47,8 @@ function newRecord() {
              injury: '', injuryPlace: '', injuryState: '', history: '' },
     parts: {},   // partId -> true（検査済）
     checks: {},  // itemKey -> true
+    painBefore: '',  // NRS 0〜10（現在の痛み）。'' は未選択
+    painAfter: '',   // NRS 0〜10（ケア後の痛み）
     care: [],
     carePoints: {},  // group -> ['太淵', 'その他', ...]
     careOther: {},   // group -> その他の経穴・対応（記述）
@@ -194,7 +199,7 @@ VIEWS.gate = () => {
       <div class="card form">
         ${APP_GAS_URL ? '' : `<div class="field full"><label>スプレッドシート連携URL <span class="req">*</span></label><input id="g-url" value="${esc(settings.gasUrl)}" placeholder="https://script.google.com/macros/s/……/exec" inputmode="url" autocomplete="off"></div>`}
         <div class="field full"><label>合言葉 <span class="req">*</span></label><input id="g-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
-        <div class="field"><label>入力者名 <span class="req">*</span></label><input id="g-examiner" value="${esc(settings.examiner)}" placeholder="例：山田 太郎"></div>
+        <div class="field"><label>検査者名 <span class="req">*</span></label><input id="g-examiner" value="${esc(settings.examiner)}" placeholder="例：山田 太郎"></div>
         <div class="field"><label>デバイス名 <span class="req">*</span></label><input id="g-device" value="${esc(settings.deviceName)}" placeholder="例：iPad-1"></div>
         <div class="full gate-err" id="g-err" role="alert"></div>
       </div>
@@ -212,7 +217,7 @@ async function unlock(btn) {
   const token = $('#g-token').value.trim(), ex = $('#g-examiner').value.trim(), dv = $('#g-device').value.trim();
   if (!url) return err('スプレッドシート連携URLを入力してください');
   if (!token) return err('合言葉を入力してください');
-  if (!ex || !dv) return err('入力者名とデバイス名を入力してください');
+  if (!ex || !dv) return err('検査者名とデバイス名を入力してください');
   if (!navigator.onLine) return err('初回はインターネット接続が必要です。つながる場所でもう一度お試しください。');
   btn.disabled = true; btn.textContent = '確認中…'; err('');
   try {
@@ -241,13 +246,14 @@ VIEWS.basic = () => {
   app.innerHTML = `
     ${editingBanner()}
     <h1>1. 基本データの入力</h1>
-    <p class="lead">入力者：<b>${esc(settings.examiner) || '未設定'}</b>（${esc(settings.deviceName)}）</p>
+    <p class="lead">検査者：<b>${esc(settings.examiner) || '未設定'}</b>（${esc(settings.deviceName)}）</p>
     <div class="card form">
+      ${rec.revision ? `<div class="field full editor-field"><label>修正者名 <span class="req">*</span></label><input id="editor" value="${esc(editorName)}" placeholder="修正する人の名前"></div>` : ''}
       ${field('name', '氏名', { req: true })}
       <div class="field"><label>年齢（歳）</label>${ageHtml(b.age)}</div>
-      <div class="field full"><label>性別</label>${segHtml('sex')}</div>
+      <div class="field"><label>性別</label>${segHtml('sex')}</div>
       <div class="field"><label>利き腕</label>${segHtml('hand')}</div>
-      <div class="field"><label>利き脚</label>${segHtml('foot')}</div>
+      <div class="field col2"><label>利き脚</label>${segHtml('foot')}</div>
       <div class="full form" id="sport-block" style="padding:0">${sportHtml()}</div>
       <div class="field full"><label>ケガの有無</label>${segHtml('injury')}</div>
       <div class="field" data-inj ${b.injury === 'あり' ? '' : 'hidden'}><label>ケガの場所</label><input data-b="injuryPlace" value="${esc(b.injuryPlace)}" placeholder="例：右足首"></div>
@@ -259,11 +265,52 @@ VIEWS.basic = () => {
       <span class="spacer"></span>
       <button class="btn primary" data-action="to-parts">次へ：検査部位の選択 →</button>
     </div>`;
+  markFilled();
 };
+
+// 入力が終わった欄に色を付ける（基本データ）
+function markFilled() {
+  app.querySelectorAll('.form .field').forEach(f => {
+    const seg = f.querySelector('.seg');
+    const ctrls = [...f.querySelectorAll('input, select, textarea')];
+    const done = seg ? !!seg.querySelector('button.on')
+      : ctrls.length > 0 && ctrls.some(c => c.value.trim() && c.value !== OTHER);
+    f.classList.toggle('filled', done);
+  });
+}
+
+// ---------- NRS（痛みの強さ 0〜10） ----------
+function nrsHtml(key, title) {
+  const v = rec[key], set = v !== '' && v != null;
+  return `<div class="card nrs ${set ? 'set' : ''}" data-nrs-box="${key}">
+    <div class="nrs-head"><span class="nrs-title">${title} <span class="req">*</span></span>
+      <span class="nrs-val" data-nrs-val="${key}">${set ? `NRS <b>${v}</b>` : '未選択'}</span></div>
+    <p class="note nrs-help">${set ? '' : 'スライダーを動かして 0〜10 で選んでください（必須）'}</p>
+    <input type="range" class="nrs-range" data-nrs="${key}" min="0" max="10" step="1" value="${set ? v : 5}" aria-label="${title}（NRS 0〜10）">
+    <div class="nrs-ticks">${Array.from({ length: 11 }, (_, i) => `<span>${i}</span>`).join('')}</div>
+    <div class="nrs-ends"><span>0 痛みなし</span><span>10 想像できる最大の痛み</span></div>
+  </div>`;
+}
+function setNrs(el) {
+  const key = el.dataset.nrs, v = Number(el.value);
+  if (rec[key] === v) return;
+  rec[key] = v; dirty = true;
+  const box = el.closest('.nrs');
+  box.classList.add('set');
+  box.querySelector('[data-nrs-val]').innerHTML = `NRS <b>${v}</b>`;
+  box.querySelector('.nrs-help').textContent = '';
+}
+function needNrs(key, msg) {
+  if (rec[key] !== '' && rec[key] != null) return false;
+  toast(msg);
+  const box = $(`[data-nrs-box="${key}"]`);
+  if (box) { box.scrollIntoView({ behavior: 'smooth', block: 'center' }); box.classList.add('alert'); setTimeout(() => box.classList.remove('alert'), 1600); }
+  return true;
+}
 
 function editingBanner() {
   return rec.revision
-    ? `<div class="editing">修正中：${esc(rec.basic.name)}（作成 ${fmt(rec.createdAt)} ${esc(rec.createdBy)}／これまでの保存 ${rec.revision}回）</div>`
+    ? `<div class="editing">修正中：${esc(rec.basic.name)}（検査 ${fmt(rec.createdAt)} ${esc(rec.createdBy)}／これまでの保存 ${rec.revision}回）</div>`
     : '';
 }
 
@@ -284,7 +331,8 @@ VIEWS.parts = () => {
   app.innerHTML = `
     ${editingBanner()}
     <h1>2. 検査部位の選択</h1>
-    <p class="lead">どの部位を検査しますか？（${esc(rec.basic.name)}さん・検査済 ${doneCount}/${PARTS.length}）</p>
+    ${nrsHtml('painBefore', '現在の痛みの状況')}
+    <p class="lead parts-q">どの部位を検査しますか？（${esc(rec.basic.name)}さん・検査済 ${doneCount}/${PARTS.length}）</p>
     <div class="card part-rows">${row('upper', '上半身')}${row('lower', '下半身')}</div>
     <div class="legend">
       <span><i style="background:var(--upper)"></i>上半身（未検査）</span>
@@ -388,6 +436,7 @@ VIEWS.care = () => {
           </div>
         </div>
       </div>`).join('')}
+    ${nrsHtml('painAfter', 'ケア後の痛みの状況')}
     <div class="actionbar">
       <button class="btn" data-go="list">← データ一覧</button>
       <span class="spacer"></span>
@@ -412,9 +461,11 @@ VIEWS.done = () => {
     <h2>保存内容</h2>
     <div class="card"><dl class="summary-grid">
       <dt>氏名</dt><dd>${esc(r.basic.name)}</dd>
-      <dt>入力者</dt><dd>${esc(r.updatedBy)}（${esc(r.updatedDevice)}）</dd>
+      <dt>検査者</dt><dd>${esc(r.createdBy)}（${esc(r.createdDevice)}）</dd>
+      ${r.revision > 1 ? `<dt>修正者</dt><dd>${esc(r.updatedBy)}（${esc(r.updatedDevice)}）</dd>` : ''}
       <dt>検査した部位</dt><dd>${tested.join('・') || 'なし'}</dd>
       <dt>検査しない部位</dt><dd>${untested.join('・') || 'なし'}</dd>
+      <dt>痛み（NRS）</dt><dd>ケア前 ${esc(r.painBefore)} → ケア後 ${esc(r.painAfter)}</dd>
       <dt>チェック数</dt><dd>${Object.keys(GROUPS).map(g => `${g}:${GROUP_ITEMS[g].filter(i => itemValue(r, i) === '✓').length}`).join(' ／ ')}</dd>
       <dt>ケア部位</dt><dd>${r.care.join('・') || 'なし'}</dd>
       ${r.care.map(g => `<dt>ケア経穴 ${g}</dt><dd>${esc(careSummary(r, g)) || '未選択'}</dd>`).join('')}
@@ -431,7 +482,7 @@ async function saveRecord() {
   if (!rec.createdAt) {
     rec.createdAt = now; rec.createdBy = settings.examiner; rec.createdDevice = settings.deviceName;
   }
-  rec.updatedAt = now; rec.updatedBy = settings.examiner;
+  rec.updatedAt = now; rec.updatedBy = rec.revision ? editorName.trim() : settings.examiner;   // 修正のときは入力された修正者名
   rec.updatedDevice = settings.deviceName; rec.updatedDeviceId = deviceId;
   rec.revision = (rec.revision || 0) + 1;
   // 選択を外したケア部位の経穴は保存しない
@@ -450,12 +501,13 @@ async function saveRecord() {
 
 // ---------- スプレッドシート連携（Google Apps Script） ----------
 function sheetHeaders() {
-  return ['レコードID', '作成日時', '作成者', '作成デバイス', '更新日時', '更新者', '更新デバイス', 'デバイスID', '修正回数',
+  return ['レコードID', '検査日時', '検査者', '検査デバイス', '修正日時', '修正者', '修正デバイス', 'デバイスID', '修正回数',
     '氏名', '年齢', '性別', '利き腕', '利き脚', 'スポーツ種目', 'ポジション', 'ケガの有無', 'ケガの場所', 'ケガの状態', '既往歴',
     '検査した部位', '検査しない部位', ...PARTS.map(p => `部位_${p.name}`),
     ...ALL_ITEMS.map(i => `${i.move.g}_${i.label}`),
     ...Object.keys(GROUPS).map(g => `チェック数_${g}`), 'ケア部位',
-    ...Object.keys(GROUPS).flatMap(g => [`ケア経穴_${g}`, `その他記述_${g}`])];
+    ...Object.keys(GROUPS).flatMap(g => [`ケア経穴_${g}`, `その他記述_${g}`]),
+    'NRS_現在の痛み', 'NRS_ケア後の痛み'];   // 既存の列がずれないよう、新しい列は必ず右端に足す
 }
 function sheetRow(r) {
   const b = r.basic;
@@ -467,7 +519,8 @@ function sheetRow(r) {
     ...ALL_ITEMS.map(i => itemValue(r, i)),
     ...Object.keys(GROUPS).map(g => GROUP_ITEMS[g].filter(i => itemValue(r, i) === '✓').length),
     r.care.join('・'),
-    ...Object.keys(GROUPS).flatMap(g => [carePts(r, g).join('・'), carePts(r, g).includes(CARE_OTHER) ? (r.careOther?.[g] || '') : ''])];
+    ...Object.keys(GROUPS).flatMap(g => [carePts(r, g).join('・'), carePts(r, g).includes(CARE_OTHER) ? (r.careOther?.[g] || '') : '']),
+    r.painBefore ?? '', r.painAfter ?? ''];
 }
 function stripLocal(r) { const { _pending, ...rest } = r; return rest; }
 
@@ -560,7 +613,7 @@ VIEWS.history = () => {
   app.innerHTML = `
     <h1>保存データ（履歴・修正）</h1>
     <p class="lead">この端末に保存したデータを表示しています。${settings.gasUrl ? '' : '（送信先未設定）'}</p>
-    <input class="search" id="q" placeholder="氏名・種目・入力者で絞り込み">
+    <input class="search" id="q" placeholder="氏名・種目・検査者・修正者で絞り込み">
     ${list.length ? `<div class="export-bar">
       <button class="btn" data-action="sel-all">すべて選択</button>
       <span class="spacer"></span>
@@ -574,7 +627,7 @@ VIEWS.history = () => {
           <div class="main">
             <div class="name">${esc(r.basic?.name) || '(氏名なし)'}${r._pending ? '<span class="pill">未送信</span>' : ''}</div>
             <div class="meta">${esc(r.basic?.sport)} ${esc(r.basic?.position)}｜検査：${PARTS.filter(p => r.parts?.[p.id]).map(p => p.name).join('・') || 'なし'}｜ケア：${(r.care || []).join('・') || 'なし'}</div>
-            <div class="meta">作成 ${fmt(r.createdAt)} ${esc(r.createdBy)}（${esc(r.createdDevice)}）／更新 ${fmt(r.updatedAt)} ${esc(r.updatedBy)}（${esc(r.updatedDevice)}）・${r.revision || 1}版</div>
+            <div class="meta">検査 ${fmt(r.createdAt)} ${esc(r.createdBy)}（${esc(r.createdDevice)}）／修正 ${fmt(r.updatedAt)} ${esc(r.updatedBy)}（${esc(r.updatedDevice)}）・${r.revision || 1}版</div>
           </div>
           <button class="btn" data-edit="${r.id}">修正</button>
         </div>`).join('') : '<p class="note">保存データはまだありません。</p>'}
@@ -612,9 +665,9 @@ async function openHistory() {
 VIEWS.settings = () => {
   app.innerHTML = `
     <h1>設定</h1>
-    <p class="lead">誰が・どのデバイスから入力したかを記録するため、最初に設定してください。</p>
+    <p class="lead">誰が・どのデバイスで検査したかを記録するため、最初に設定してください。</p>
     <div class="card form">
-      <div class="field"><label>入力者名 <span class="req">*</span></label><input id="s-examiner" value="${esc(settings.examiner)}" placeholder="例：山田 太郎"></div>
+      <div class="field"><label>検査者名 <span class="req">*</span></label><input id="s-examiner" value="${esc(settings.examiner)}" placeholder="例：山田 太郎"></div>
       <div class="field"><label>デバイス名 <span class="req">*</span></label><input id="s-device" value="${esc(settings.deviceName)}" placeholder="例：iPad-1"></div>
       ${APP_GAS_URL ? '' : `<div class="field full"><label>スプレッドシート連携URL（Google Apps Script のウェブアプリURL）</label><input id="s-url" value="${esc(settings.gasUrl)}" placeholder="https://script.google.com/macros/s/……/exec" inputmode="url"></div>`}
       <div class="field full"><label>合言葉</label>
@@ -622,7 +675,7 @@ VIEWS.settings = () => {
           <button class="btn" data-action="change-token">合言葉を変更</button>
           <button class="btn danger" data-action="lock">この端末をロック</button></div>
         <div class="note">ロックすると合言葉の入力画面に戻ります。入力済みのデータは消えません。</div></div>
-      <div class="full note">デバイスID：${esc(deviceId)}</div>
+      <div class="full note">バージョン：<b>${APP_VERSION}</b>　／　デバイスID：${esc(deviceId)}</div>
     </div>
     <div class="actionbar">
       ${settings.gasUrl ? '<button class="btn" data-action="test-conn">接続テスト</button>' : ''}
@@ -634,7 +687,9 @@ VIEWS.settings = () => {
 // ---------- イベント ----------
 app.addEventListener('input', e => {
   const k = e.target.dataset.b;
-  if (k) { rec.basic[k] = e.target.value; dirty = true; }
+  if (k) { rec.basic[k] = e.target.value; dirty = true; markFilled(); }
+  if (e.target.id === 'editor') { editorName = e.target.value; markFilled(); }
+  if (e.target.dataset.nrs) setNrs(e.target);
   const og = e.target.dataset.cother;
   if (og) { rec.careOther = { ...rec.careOther, [og]: e.target.value }; dirty = true; }
 });
@@ -647,6 +702,7 @@ app.addEventListener('change', e => {
   if (key === 'sport') { rec.basic.position = ''; otherMode.position = false; }
   dirty = true;
   $('#sport-block').innerHTML = sportHtml();
+  markFilled();
   if (v === OTHER) $(`#sport-block input[data-b="${key}"]`)?.focus();
 });
 
@@ -663,9 +719,13 @@ document.addEventListener('click', async e => {
     dirty = true;
     t.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.val === rec.basic[key]));
     if (key === 'injury') document.querySelectorAll('[data-inj]').forEach(el => { el.hidden = rec.basic.injury !== 'あり'; });
+    markFilled();
     return;
   }
-  if (d.part) return go('part:' + d.part);
+  if (d.part) {
+    if (needNrs('painBefore', '先に「現在の痛みの状況」をNRSで選んでください')) return;
+    return go('part:' + d.part);
+  }
   if (d.chk) {
     rec.checks[d.chk] = !rec.checks[d.chk];
     if (!rec.checks[d.chk]) delete rec.checks[d.chk];
@@ -707,7 +767,7 @@ document.addEventListener('click', async e => {
   }
   if (d.edit) {
     rec = structuredClone(stripLocal(app._histList[d.edit]));
-    dirty = false;
+    dirty = false; editorName = settings.examiner;
     toast(`${rec.basic.name} さんのデータを修正します`);
     return go('basic');
   }
@@ -723,7 +783,8 @@ document.addEventListener('click', async e => {
       if (await askYes('入力内容を破棄しますか？', '破棄する', 'danger')) { rec = newRecord(); dirty = false; go('basic'); }
       break;
     case 'to-parts':
-      if (!settings.examiner) { toast('先に「設定」で入力者名を登録してください'); return go('settings'); }
+      if (!settings.examiner) { toast('先に「設定」で検査者名を登録してください'); return go('settings'); }
+      if (rec.revision && !editorName.trim()) { toast('修正者名を入力してください'); $('#editor').focus(); return; }
       if (!rec.basic.name.trim()) { toast('氏名を入力してください'); $('[data-b="name"]').focus(); return; }
       go('parts'); break;
     case 'part-done':
@@ -731,12 +792,16 @@ document.addEventListener('click', async e => {
     case 'untest':
       if (await askYes('この部位を未検査に戻します（チェックは残ります）。', '未検査に戻す')) { delete rec.parts[d.pid]; dirty = true; go('parts'); }
       break;
-    case 'to-list': go('list'); break;
+    case 'to-list':
+      if (needNrs('painBefore', '「現在の痛みの状況」をNRSで選んでください')) return;
+      go('list'); break;
     case 'save':
+      if (needNrs('painAfter', '「ケア後の痛みの状況」をNRSで選んでください')) return;
+      if (rec.revision && !editorName.trim()) { toast('修正者名を入力してください'); return go('basic'); }
       t.disabled = true; t.textContent = '保存中…';
       await saveRecord(); break;
     case 'edit-current':
-      rec = structuredClone(stripLocal(records[rec.id])); go('basic'); break;
+      rec = structuredClone(stripLocal(records[rec.id])); editorName = settings.examiner; go('basic'); break;
     case 'finish':
       rec = newRecord(); dirty = false; go('basic'); break;
     case 'del-local': deleteLocal([...histSel]); break;
@@ -766,7 +831,7 @@ document.addEventListener('click', async e => {
     }
     case 'save-settings': {
       const ex = $('#s-examiner').value.trim(), dv = $('#s-device').value.trim();
-      if (!ex || !dv) return toast('入力者名とデバイス名を入力してください');
+      if (!ex || !dv) return toast('検査者名とデバイス名を入力してください');
       settings = { ...settings, examiner: ex, deviceName: dv, gasUrl: APP_GAS_URL || $('#s-url').value.trim() };
       store.set('mt_settings', settings);
       toast('設定を保存しました');
@@ -786,6 +851,36 @@ document.addEventListener('click', async e => {
       break;
   }
 });
+
+// つまみを動かさずにタップしただけでも、その値を選んだことにする
+app.addEventListener('change', e => { if (e.target.dataset.nrs) setNrs(e.target); });
+app.addEventListener('pointerup', e => { if (e.target.dataset?.nrs) setNrs(e.target); });
+
+// 文字入力中（画面のキーボード表示中）は下のボタンを隠し、誤って押さないようにする
+// iPad ではキーボードの「閉じる」ボタンを押しても入力欄が選ばれたままなので、
+// 「入力欄が選ばれている」かつ「キーボードで画面の見える部分が縮んでいる」ときだけ隠す
+const isTyping = el => el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(el.type)));
+// 画面の向き（幅）ごとに、これまでで一番大きかった「見えている高さ」を覚えておき、
+// そこから大きく縮んでいればキーボードが出ていると判断する（ブラウザごとの違いに左右されにくい）
+const vpMax = {};
+function viewHeight() {
+  const vv = window.visualViewport;
+  return vv ? vv.height * vv.scale : window.innerHeight;
+}
+function keyboardShown() {
+  const o = Math.round(window.innerWidth);   // 画面の幅ごと（＝縦向き・横向きごと）に覚える。幅はキーボードで変わらない
+  const h = viewHeight();
+  vpMax[o] = Math.max(vpMax[o] || 0, h);
+  return vpMax[o] - h > 150;
+}
+keyboardShown();   // 起動時の高さを記録
+function updateTyping() {
+  document.body.classList.toggle('typing', isTyping(document.activeElement) && keyboardShown());
+}
+document.addEventListener('focusin', () => setTimeout(updateTyping, 50));
+document.addEventListener('focusout', () => setTimeout(updateTyping, 100));   // 次の入力欄へ移るときは隠したまま
+window.visualViewport?.addEventListener('resize', updateTyping);               // キーボードが出た・閉じた
+window.addEventListener('resize', updateTyping);
 
 window.addEventListener('online', syncPending);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncPending(); });
