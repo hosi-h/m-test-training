@@ -1,5 +1,5 @@
 // オフラインでも動くようにアプリ本体と画像をキャッシュする
-const CACHE = 'mtest-v11';
+const CACHE = 'mtest-v12';
 const IMGS = ['neck_ext', 'neck_flex', 'neck_lat', 'sho_ext', 'sho_flex', 'sho_hflex', 'sho_hext',
   'elb_pro', 'elb_sup', 'elb_flex', 'elb_ext', 'wr_uln', 'wr_rad', 'wr_palm', 'wr_dors',
   'low_ext', 'low_flex', 'low_lat', 'hip_ext', 'hip_flex', 'hip_er', 'hip_add', 'hip_abd',

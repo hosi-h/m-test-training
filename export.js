@@ -91,9 +91,11 @@ function addPersonSheet(wb, r, name) {
 
   const info = [
     ['氏名', b.name], ['年齢（歳）', /^\d+$/.test(b.age ?? '') ? Number(b.age) : b.age], ['性別', b.sex], ['利き腕', b.hand], ['利き脚', b.foot],
-    ['スポーツ種目', b.sport], ['ポジション', b.position], ['ケガの有無', b.injury], ['ケガの場所', b.injuryPlace],
-    ['ケガの状態', b.injuryState], ['既往歴', b.history],
-    ['NRS 現在の痛み', r.painBefore ?? ''], ['NRS ケア後の痛み', r.painAfter ?? ''],
+    ['職業', b.job], ['職業メモ', b.jobMemo],
+    ['スポーツ種目', b.sport], ['ポジション', b.position], ['主訴', b.complaint], ['既往歴', b.history],
+    ['NRS 主訴の痛み', r.painBefore ?? ''], ['NRS ケア後の痛み', r.painAfter ?? ''],
+    // v1.1 以前の記録でケガの入力があるときだけ出す
+    ...(b.injury ? [['ケガの有無', b.injury], ['ケガの場所', b.injuryPlace], ['ケガの状態', b.injuryState]] : []),
     ['検査した部位', PARTS.filter(p => r.parts?.[p.id]).map(p => p.name).join('・') || 'なし'],
     ['検査しない部位', PARTS.filter(p => !r.parts?.[p.id]).map(p => p.name).join('・') || 'なし'],
     ['検査', `${fmt(r.createdAt)} ${r.createdBy || ''}（${r.createdDevice || ''}）`],

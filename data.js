@@ -40,14 +40,15 @@ const PARTS = [
     { id: 'low_flex', name: '腰前屈', g: 'E', lr: false, desc: '立ってゆっくりと腰を前方に曲げる' },
     { id: 'low_lat',  name: '腰側屈', g: 'F', lr: true,  desc: '立ってゆっくりと腰を横にたおす' },
   ]},
-  { id: 'hip', name: '股', body: 'lower', moves: [
+  // 股と膝は 1 つの部位として検査する（v1.2〜）。以前の記録の hip / knee は app.js で hipknee に読み替える
+  // cols：チェック画面での並び（列ごと）。D・E・F の列に分けて表示する
+  { id: 'hipknee', name: '股・膝', body: 'lower',
+    cols: [['hip_ext', 'knee_flex'], ['hip_flex', 'hip_flexk'], ['hip_er', 'hip_add', 'hip_abd']], moves: [
     { id: 'hip_ext',  name: '股伸展', g: 'D', lr: true, desc: 'うつ伏せで腰を伸ばしてゆっくりと下肢を上げる' },
     { id: 'hip_flex', name: '股屈曲', g: 'E', lr: true, desc: '仰向けで腰を伸ばしてゆっくりと下肢を上げる' },
     { id: 'hip_er',   name: '股外旋', g: 'F', lr: true, desc: '仰向けで腰を曲げてゆっくりと股をひらく' },
     { id: 'hip_add',  name: '股内転', g: 'F', lr: true, desc: '仰向けで腰を伸ばしてゆっくりと股をとじる' },
     { id: 'hip_abd',  name: '股外転', g: 'F', lr: true, desc: '仰向けで腰を伸ばしてゆっくりと股をひらく' },
-  ]},
-  { id: 'knee', name: '膝', body: 'lower', moves: [
     { id: 'hip_flexk', name: '股屈曲（膝屈曲時）', g: 'E', lr: true, desc: '仰向けで膝をゆっくりと曲げる' },
     { id: 'knee_flex', name: '膝屈曲',             g: 'D', lr: true, desc: 'うつ伏せで膝をゆっくりと曲げる' },
   ]},
@@ -97,6 +98,13 @@ const CARE = {
   ],
 };
 
+// 職業の選択肢（体の使い方で分ける）。具体的な業務は「職業メモ」に書く
+const OCCUPATIONS = [
+  '学生（小学生）', '学生（中学生）', '学生（高校生）', '学生（大学・専門学校）',
+  'デスクワーク中心', '立ち仕事中心', '体を使う仕事', '運転が中心', '医療・介護・治療',
+  'スポーツ選手（プロ・実業団）', 'スポーツ指導者', '家事が中心', '無職・退職', 'その他',
+];
+
 // スポーツ種目とポジションの選択肢（空配列はポジションを自由入力）
 // 一覧にない種目・ポジションは「その他」を選んで自由入力できる
 const SPORTS = {
@@ -121,6 +129,10 @@ const SPORTS = {
   '体操': [],
   'ゴルフ': [],
 };
+
+// スプレッドシートの「部位_〇〇」列（列がずれないよう、股と膝は別々の列のまま残す）
+const SHEET_PARTS = [['頸', 'neck'], ['肩', 'shoulder'], ['肘', 'elbow'], ['手首', 'wrist'],
+  ['腰', 'lowback'], ['股', 'hipknee'], ['膝', 'hipknee'], ['足首', 'ankle']];
 
 // --- 派生データ ---
 const MOVES = {};      // moveId -> move（partId 付き）

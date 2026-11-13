@@ -1,7 +1,7 @@
 // M-Test 検査トレーニング PWA
 'use strict';
 
-const APP_VERSION = 'v1.1';   // 合流（マージ）のたびに上げる。GitHub の版の名前（タグ）と同じにする
+const APP_VERSION = 'v1.2';   // 合流（マージ）のたびに上げる。GitHub の版の名前（タグ）と同じにする
 
 // ---------- 保存領域 ----------
 const store = {
@@ -33,6 +33,13 @@ if (APP_GAS_URL) settings.gasUrl = APP_GAS_URL;
 let gateReason = '';      // 合言葉画面を出す理由：'' 初回 / 'changed' 合言葉が変わった / 'change' 自分で変更
 let gateReturn = 'basic'; // 合言葉が通った後に戻る画面
 let records = store.get('mt_records', {});   // id -> record（_pending: 未送信）
+// v1.1 以前の記録の「股」「膝」を、まとめた部位「股・膝」に読み替える（どちらかを検査していれば検査済）
+function normParts(r) {
+  if (!r?.parts || !('hip' in r.parts || 'knee' in r.parts)) return;
+  if (r.parts.hip || r.parts.knee) r.parts.hipknee = true;
+  delete r.parts.hip; delete r.parts.knee;
+}
+Object.values(records).forEach(normParts);
 let rec = newRecord();
 let dirty = false;
 let editorName = '';   // 修正するときの修正者名（初期値は設定の検査者名）
@@ -44,10 +51,11 @@ function newRecord() {
     createdAt: '', createdBy: '', createdDevice: '',
     updatedAt: '', updatedBy: '', updatedDevice: '', updatedDeviceId: '',
     basic: { name: '', age: '', sex: '', hand: '', foot: '', sport: '', position: '',
-             injury: '', injuryPlace: '', injuryState: '', history: '' },
+             injury: '', injuryPlace: '', injuryState: '',   // ケガの有無などは v1.2 で入力をやめた（以前の記録のために残す）
+             job: '', jobMemo: '', complaint: '', history: '' },
     parts: {},   // partId -> true（検査済）
     checks: {},  // itemKey -> true
-    painBefore: '',  // NRS 0〜10（現在の痛み）。'' は未選択
+    painBefore: '',  // NRS 0〜10（主訴の痛み。基本データで入力）。'' は未選択
     painAfter: '',   // NRS 0〜10（ケア後の痛み）
     care: [],
     carePoints: {},  // group -> ['太淵', 'その他', ...]
@@ -130,7 +138,6 @@ const SEG = {
   sex: ['男性', '女性', 'その他'],
   hand: ['右', '左', '両'],
   foot: ['右', '左', '両'],
-  injury: ['なし', 'あり'],
 };
 function segHtml(key) {
   return `<div class="seg" data-seg="${key}">${SEG[key].map(o =>
@@ -181,6 +188,14 @@ function ageHtml(cur) {
   return `<select data-b="age">
     <option value="" ${cur ? '' : 'selected'}>選択してください</option>
     ${ages.map(a => `<option value="${a}" ${String(cur) === a ? 'selected' : ''}>${a}</option>`).join('')}</select>`;
+}
+
+// 職業は一覧から選ぶ（一覧にないときは「その他」を選び、職業メモに書く）
+function jobHtml(cur) {
+  const list = cur && !OCCUPATIONS.includes(cur) ? [cur, ...OCCUPATIONS] : OCCUPATIONS;
+  return `<select data-b="job">
+    <option value="" ${cur ? '' : 'selected'}>選択してください</option>
+    ${list.map(o => `<option value="${esc(o)}" ${cur === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
 }
 
 const VIEWS = {};
@@ -254,11 +269,12 @@ VIEWS.basic = () => {
       <div class="field"><label>性別</label>${segHtml('sex')}</div>
       <div class="field"><label>利き腕</label>${segHtml('hand')}</div>
       <div class="field col2"><label>利き脚</label>${segHtml('foot')}</div>
+      <div class="field"><label>職業</label>${jobHtml(b.job)}</div>
+      <div class="field"><label>職業メモ（具体的な業務など）</label><input data-b="jobMemo" value="${esc(b.jobMemo)}" placeholder="例：一日中パソコン作業、重い荷物の運搬"></div>
       <div class="full form" id="sport-block" style="padding:0">${sportHtml()}</div>
-      <div class="field full"><label>ケガの有無</label>${segHtml('injury')}</div>
-      <div class="field" data-inj ${b.injury === 'あり' ? '' : 'hidden'}><label>ケガの場所</label><input data-b="injuryPlace" value="${esc(b.injuryPlace)}" placeholder="例：右足首"></div>
-      <div class="field" data-inj ${b.injury === 'あり' ? '' : 'hidden'}><label>ケガの状態</label><input data-b="injuryState" value="${esc(b.injuryState)}" placeholder="例：捻挫・2週間前"></div>
+      ${field('complaint', '主訴', { textarea: true, full: true, ph: '例：投球時に右肩の前が痛む' })}
       ${field('history', '既往歴', { textarea: true, full: true })}
+      <div class="full">${nrsHtml('painBefore', '主訴の状況（痛み）')}</div>
     </div>
     <div class="actionbar">
       ${dirty || rec.revision ? '<button class="btn warn" data-action="discard">入力を破棄</button>' : ''}
@@ -331,8 +347,7 @@ VIEWS.parts = () => {
   app.innerHTML = `
     ${editingBanner()}
     <h1>2. 検査部位の選択</h1>
-    ${nrsHtml('painBefore', '現在の痛みの状況')}
-    <p class="lead parts-q">どの部位を検査しますか？（${esc(rec.basic.name)}さん・検査済 ${doneCount}/${PARTS.length}）</p>
+    <p class="lead">どの部位を検査しますか？（${esc(rec.basic.name)}さん・検査済 ${doneCount}/${PARTS.length}）</p>
     <div class="card part-rows">${row('upper', '上半身')}${row('lower', '下半身')}</div>
     <div class="legend">
       <span><i style="background:var(--upper)"></i>上半身（未検査）</span>
@@ -351,18 +366,19 @@ VIEWS.part = (pid) => {
   const p = PARTS.find(x => x.id === pid);
   const chk = (key, label) => `<button class="chk ${rec.checks[key] ? 'on' : ''}" data-chk="${key}">
       <span class="box">${rec.checks[key] ? '✓' : ''}</span>${label}</button>`;
-  app.innerHTML = `
-    <h1>${p.body === 'upper' ? '上半身' : '下半身'}・${p.name}</h1>
-    <p class="lead">該当する動作にチェックしてください。終わったら「検査終了」を押します。</p>
-    <div class="moves">
-      ${p.moves.map(m => `
+  const moveCard = m => `
         <div class="move">
           <h3>${gtag(m.g)}${m.name}</h3>
           <img src="img/${m.id}.jpg" alt="${m.name}のイラスト" loading="lazy">
           <div class="desc">${m.desc}</div>
           <div class="checks">${m.lr ? chk(m.id + '_L', '左') + chk(m.id + '_R', '右') : chk(m.id, 'チェック')}</div>
-        </div>`).join('')}
-    </div>
+        </div>`;
+  app.innerHTML = `
+    <h1>${p.body === 'upper' ? '上半身' : '下半身'}・${p.name}</h1>
+    <p class="lead">該当する動作にチェックしてください。終わったら「検査終了」を押します。</p>
+    ${p.cols
+      ? `<div class="move-cols">${p.cols.map(col => `<div class="move-col">${col.map(id => moveCard(p.moves.find(m => m.id === id))).join('')}</div>`).join('')}</div>`
+      : `<div class="moves">${p.moves.map(moveCard).join('')}</div>`}
     <div class="actionbar">
       <button class="btn" data-go="parts">← 戻る</button>
       ${rec.parts[pid] ? `<button class="btn warn" data-action="untest" data-pid="${pid}">未検査に戻す</button>` : ''}
@@ -465,7 +481,9 @@ VIEWS.done = () => {
       ${r.revision > 1 ? `<dt>修正者</dt><dd>${esc(r.updatedBy)}（${esc(r.updatedDevice)}）</dd>` : ''}
       <dt>検査した部位</dt><dd>${tested.join('・') || 'なし'}</dd>
       <dt>検査しない部位</dt><dd>${untested.join('・') || 'なし'}</dd>
-      <dt>痛み（NRS）</dt><dd>ケア前 ${esc(r.painBefore)} → ケア後 ${esc(r.painAfter)}</dd>
+      <dt>職業</dt><dd>${esc(r.basic.job) || '未入力'}${r.basic.jobMemo ? `（${esc(r.basic.jobMemo)}）` : ''}</dd>
+      <dt>主訴</dt><dd>${esc(r.basic.complaint) || 'なし'}</dd>
+      <dt>痛み（NRS）</dt><dd>主訴 ${esc(r.painBefore)} → ケア後 ${esc(r.painAfter)}</dd>
       <dt>チェック数</dt><dd>${Object.keys(GROUPS).map(g => `${g}:${GROUP_ITEMS[g].filter(i => itemValue(r, i) === '✓').length}`).join(' ／ ')}</dd>
       <dt>ケア部位</dt><dd>${r.care.join('・') || 'なし'}</dd>
       ${r.care.map(g => `<dt>ケア経穴 ${g}</dt><dd>${esc(careSummary(r, g)) || '未選択'}</dd>`).join('')}
@@ -503,11 +521,11 @@ async function saveRecord() {
 function sheetHeaders() {
   return ['レコードID', '検査日時', '検査者', '検査デバイス', '修正日時', '修正者', '修正デバイス', 'デバイスID', '修正回数',
     '氏名', '年齢', '性別', '利き腕', '利き脚', 'スポーツ種目', 'ポジション', 'ケガの有無', 'ケガの場所', 'ケガの状態', '既往歴',
-    '検査した部位', '検査しない部位', ...PARTS.map(p => `部位_${p.name}`),
+    '検査した部位', '検査しない部位', ...SHEET_PARTS.map(([n]) => `部位_${n}`),
     ...ALL_ITEMS.map(i => `${i.move.g}_${i.label}`),
     ...Object.keys(GROUPS).map(g => `チェック数_${g}`), 'ケア部位',
     ...Object.keys(GROUPS).flatMap(g => [`ケア経穴_${g}`, `その他記述_${g}`]),
-    'NRS_現在の痛み', 'NRS_ケア後の痛み'];   // 既存の列がずれないよう、新しい列は必ず右端に足す
+    'NRS_主訴の痛み', 'NRS_ケア後の痛み', '主訴', '職業', '職業メモ'];   // 既存の列がずれないよう、新しい列は必ず右端に足す
 }
 function sheetRow(r) {
   const b = r.basic;
@@ -515,12 +533,12 @@ function sheetRow(r) {
     b.name, b.age, b.sex, b.hand, b.foot, b.sport, b.position, b.injury, b.injuryPlace, b.injuryState, b.history,
     PARTS.filter(p => r.parts[p.id]).map(p => p.name).join('・'),
     PARTS.filter(p => !r.parts[p.id]).map(p => p.name).join('・'),
-    ...PARTS.map(p => r.parts[p.id] ? '検査済' : '未検査'),
+    ...SHEET_PARTS.map(([, id]) => r.parts[id] ? '検査済' : '未検査'),
     ...ALL_ITEMS.map(i => itemValue(r, i)),
     ...Object.keys(GROUPS).map(g => GROUP_ITEMS[g].filter(i => itemValue(r, i) === '✓').length),
     r.care.join('・'),
     ...Object.keys(GROUPS).flatMap(g => [carePts(r, g).join('・'), carePts(r, g).includes(CARE_OTHER) ? (r.careOther?.[g] || '') : '']),
-    r.painBefore ?? '', r.painAfter ?? ''];
+    r.painBefore ?? '', r.painAfter ?? '', b.complaint ?? '', b.job ?? '', b.jobMemo ?? ''];
 }
 function stripLocal(r) { const { _pending, ...rest } = r; return rest; }
 
@@ -718,14 +736,10 @@ document.addEventListener('click', async e => {
     rec.basic[key] = rec.basic[key] === d.val ? '' : d.val;
     dirty = true;
     t.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.val === rec.basic[key]));
-    if (key === 'injury') document.querySelectorAll('[data-inj]').forEach(el => { el.hidden = rec.basic.injury !== 'あり'; });
     markFilled();
     return;
   }
-  if (d.part) {
-    if (needNrs('painBefore', '先に「現在の痛みの状況」をNRSで選んでください')) return;
-    return go('part:' + d.part);
-  }
+  if (d.part) return go('part:' + d.part);
   if (d.chk) {
     rec.checks[d.chk] = !rec.checks[d.chk];
     if (!rec.checks[d.chk]) delete rec.checks[d.chk];
@@ -786,17 +800,17 @@ document.addEventListener('click', async e => {
       if (!settings.examiner) { toast('先に「設定」で検査者名を登録してください'); return go('settings'); }
       if (rec.revision && !editorName.trim()) { toast('修正者名を入力してください'); $('#editor').focus(); return; }
       if (!rec.basic.name.trim()) { toast('氏名を入力してください'); $('[data-b="name"]').focus(); return; }
+      if (needNrs('painBefore', '「主訴の状況（痛み）」をNRSで選んでください')) return;
       go('parts'); break;
     case 'part-done':
       rec.parts[d.pid] = true; dirty = true; go('parts'); break;
     case 'untest':
       if (await askYes('この部位を未検査に戻します（チェックは残ります）。', '未検査に戻す')) { delete rec.parts[d.pid]; dirty = true; go('parts'); }
       break;
-    case 'to-list':
-      if (needNrs('painBefore', '「現在の痛みの状況」をNRSで選んでください')) return;
-      go('list'); break;
+    case 'to-list': go('list'); break;
     case 'save':
       if (needNrs('painAfter', '「ケア後の痛みの状況」をNRSで選んでください')) return;
+      if (rec.painBefore === '' || rec.painBefore == null) { toast('基本データの「主訴の状況（痛み）」をNRSで選んでください'); return go('basic'); }
       if (rec.revision && !editorName.trim()) { toast('修正者名を入力してください'); return go('basic'); }
       t.disabled = true; t.textContent = '保存中…';
       await saveRecord(); break;
